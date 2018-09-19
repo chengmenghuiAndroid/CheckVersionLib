@@ -27,12 +27,14 @@ import com.allenliu.versionchecklib.callback.APKDownloadListener;
 import com.allenliu.versionchecklib.callback.CommitClickListener;
 import com.allenliu.versionchecklib.callback.DialogDismissListener;
 import com.allenliu.versionchecklib.callback.DownloadListener;
+import com.allenliu.versionchecklib.core.http.AllenHttp;
 import com.allenliu.versionchecklib.utils.ALog;
 import com.allenliu.versionchecklib.utils.AppUtils;
+import com.allenliu.versionchecklib.v2.ui.AllenBaseActivity;
 
 import java.io.File;
 
-public class VersionDialogActivity extends Activity implements DownloadListener, DialogInterface.OnDismissListener {
+public class VersionDialogActivity extends AllenBaseActivity implements DownloadListener, DialogInterface.OnDismissListener {
 
     public static final int MY_PERMISSIONS_REQUEST_WRITE_EXTERNAL_STORAGE = 0x123;
     protected Dialog versionDialog;
@@ -49,48 +51,12 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
     private View loadingView;
     public static VersionDialogActivity instance;
 
-    public static void setTransparent(Activity activity) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.KITKAT) {
-            return;
-        }
-        transparentStatusBar(activity);
-        setRootView(activity);
-    }
-
-    /**
-     * 使状态栏透明
-     */
-    @TargetApi(Build.VERSION_CODES.KITKAT)
-    private static void transparentStatusBar(Activity activity) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            activity.getWindow().clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION);
-            activity.getWindow().setStatusBarColor(Color.TRANSPARENT);
-        } else {
-            activity.getWindow().addFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
-        }
-    }
-
-    /**
-     * 设置根布局参数
-     */
-    private static void setRootView(Activity activity) {
-        ViewGroup parent = (ViewGroup) activity.findViewById(android.R.id.content);
-        for (int i = 0, count = parent.getChildCount(); i < count; i++) {
-            View childView = parent.getChildAt(i);
-            if (childView instanceof ViewGroup) {
-                childView.setFitsSystemWindows(true);
-                ((ViewGroup) childView).setClipToPadding(true);
-            }
-        }
-    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         instance = this;
-        setTransparent(this);
+
         boolean isRetry = getIntent().getBooleanExtra("isRetry", false);
         Log.e("isRetry", isRetry + "");
         if (isRetry) {
@@ -173,10 +139,10 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
                 loadingDialog.setOnCancelListener(new DialogInterface.OnCancelListener() {
                     @Override
                     public void onCancel(DialogInterface dialog) {
-                        AllenChecker.cancelMission();
+                        AllenHttp.getHttpClient().dispatcher().cancelAll();
                     }
                 });
-//            loadingDialog.setOnDismissListener(dismissListener);
+//                loadingDialog.setOnDismissListener(this);
             }
             ProgressBar pb = (ProgressBar) loadingView.findViewById(R.id.pb);
             TextView tvProgress = (TextView) loadingView.findViewById(R.id.tv_progress);
@@ -188,25 +154,24 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
 
     public void showFailDialog() {
         if (!isDestroy) {
-            if (failDialog == null) {
-                failDialog = new AlertDialog.Builder(this).setMessage(getString(R.string.versionchecklib_download_fail_retry)).setPositiveButton(getString(R.string.versionchecklib_confirm), new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        if (commitListener != null)
-                            commitListener.onCommitClick();
-                        dealAPK();
-                    }
-                }).setNegativeButton(getString(R.string.versionchecklib_cancel), new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        finish();
-                    }
-                }).create();
-//            failDialog.setOnDismissListener(dismissListener);
-                failDialog.setCanceledOnTouchOutside(false);
-                failDialog.setCancelable(false);
+            if (versionParams != null && versionParams.isShowDownloadFailDialog()) {
+                if (failDialog == null) {
+                    failDialog = new AlertDialog.Builder(this).setMessage(getString(R.string.versionchecklib_download_fail_retry)).setPositiveButton(getString(R.string.versionchecklib_confirm), new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            if (commitListener != null)
+                                commitListener.onCommitClick();
+                            dealAPK();
+                        }
+                    }).setNegativeButton(getString(R.string.versionchecklib_cancel), null).create();
+                    failDialog.setOnDismissListener(this);
+                    failDialog.setCanceledOnTouchOutside(false);
+                    failDialog.setCancelable(false);
+                }
+                failDialog.show();
+            } else {
+                onDismiss(null);
             }
-            failDialog.show();
         }
     }
 
@@ -219,7 +184,7 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
     }
 
     private void retryDownload(Intent intent) {
-
+        dismissAllDialog();
         versionParams = intent.getParcelableExtra(AVersionService.VERSION_PARAMS_KEY);
         downloadUrl = intent.getStringExtra("downloadUrl");
 //        paramBundle = intent.getBundleExtra(AVersionService.VERSION_PARAMS_EXTRA_KEY);
@@ -258,7 +223,7 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
         //提前让loadingDialog实例化
         if (versionParams.isShowDownloadingDialog())
             showLoadingDialog(0);
-        DownloadManager.downloadAPK(this, downloadUrl, versionParams, this);
+        DownloadManager.downloadAPK(downloadUrl, versionParams, this);
     }
 
 
@@ -353,6 +318,7 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
         dismissAllDialog();
         showFailDialog();
 
+
     }
 
     @Override
@@ -371,10 +337,14 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
         super.onDestroy();
     }
 
+
+
+
     private void dismissAllDialog() {
         if (isDestroy) {
 
         } else {
+            ALog.e("dismiss all dialog");
             if (loadingDialog != null && loadingDialog.isShowing())
                 loadingDialog.dismiss();
             if (versionDialog != null && versionDialog.isShowing())
@@ -386,15 +356,25 @@ public class VersionDialogActivity extends Activity implements DownloadListener,
 
     @Override
     public void onDismiss(DialogInterface dialogInterface) {
-        if (cancelListener != null) {
-            //通过loadingdialog是否显示来判断是取消还是继续加载
-            if (versionParams.isSilentDownload()
-                    || (!versionParams.isSilentDownload() && loadingDialog == null && versionParams.isShowDownloadingDialog())
-                    || (!versionParams.isSilentDownload() && loadingDialog != null && !loadingDialog.isShowing() && versionParams.isShowDownloadingDialog())) {
+        //通过loadingdialog是否显示来判断是取消还是继续加载
+        if (versionParams.isSilentDownload()
+                || (!versionParams.isSilentDownload() && loadingDialog == null && versionParams.isShowDownloadingDialog())
+                || (!versionParams.isSilentDownload() && loadingDialog != null && !loadingDialog.isShowing() && versionParams.isShowDownloadingDialog())) {
+            if (cancelListener != null) {
                 cancelListener.dialogDismiss(dialogInterface);
-                finish();
             }
+            finish();
+            AllenChecker.cancelMission();
         }
+    }
+    @Override
+    public void showDefaultDialog() {
+
+    }
+
+    @Override
+    public void showCustomDialog() {
+
     }
 
 }
